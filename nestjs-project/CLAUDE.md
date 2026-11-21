@@ -13,6 +13,9 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `curl -fs http://localhost:9000/minio/health/live` — expect exit code 0; `docker compose ps -a storage-init` must show `Exited (0)` (bucket created)
+- **Video worker:** `docker compose logs video-worker` — expect `WorkerModule dependencies initialized` with no restart loop
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -21,11 +24,12 @@ Only start the NestJS dev server (`npm run start:dev`) when the user **explicitl
 This project runs inside Docker. Always use the container for development:
 
 ```bash
-# Start containers
-docker compose up -d
-
-# Install dependencies (first time only)
+# First run, in this order
+cp .env.example .env
+docker compose up -d --build
 docker compose exec nestjs-api npm install
+docker compose exec nestjs-api npm run migration:run
+docker compose restart video-worker   # it keeps restarting until node_modules exists
 
 # Run the dev server (watch mode)
 docker compose exec nestjs-api npm run start:dev
@@ -33,7 +37,14 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
+- `video-worker` — same image and volume as `nestjs-api`; builds the worker into `dist-worker/` and runs it with `exec node`, so node is PID 1 and gets the `SIGTERM` (npm and `nest start --watch` do not forward it). Consumes the `video-processing` queue; no HTTP port. **No hot reload: after changing worker code run `docker compose restart video-worker`.** `stop_grace_period: 3m` lets it finish the active job on `docker compose stop`. For watch mode, stop the service and run `npm run start:worker` in `nestjs-api` instead — never both, or two workers share the queue
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `redis` — Redis 7.4 for BullMQ, port `6379`
+- `minio` — S3-compatible storage, API on `9000`, console on `9001` (login = `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY`). Image `pgsty/minio`, a community fork: `minio/minio` is no longer published on Docker Hub
+- `storage-init` — one-shot `mc` container that creates the bucket and exits
+- `mailpit` — SMTP on `1025`, web UI on `8025`
+
+The image includes `ffmpeg`/`ffprobe` (`Dockerfile.dev`). After changing the Dockerfile run `docker compose up -d --build`.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -60,13 +71,16 @@ docker compose down
 
 ```bash
 npm run start:dev                        # Dev server with hot-reload
-npm run build                            # Compile to dist/
-npm run start:prod                       # Run compiled build
+npm run start:worker                     # Video worker with hot-reload (output in dist-worker/, so it does not wipe the API's dist/); stop the video-worker service first
+npm run build                            # Compile API and worker to dist/
+npm run start:prod                       # Run compiled API
+npm run start:worker:prod                # Run compiled worker (dist/worker.js)
+npm run migration:run                    # Apply pending migrations
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm run test:e2e                         # End-to-end tests (the script passes --runInBand)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -92,6 +106,32 @@ docker compose exec nestjs-api npm run test:e2e   # already configured
 ```
 
 Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently.
+
+Suites that touch the video queue set their own `QUEUE_PREFIX` before compiling the Nest module, so the Compose `video-worker` (prefix `bull`) never takes their jobs, and they obliterate their queue at the end. Suites that fetch presigned URLs from inside the container set `STORAGE_PUBLIC_ENDPOINT` to the internal endpoint. The Compose worker shares the database with the tests: its reconciliation only picks videos stuck in `processing` for more than 10 minutes, so it does not race the suites, but it may reprocess rows a suite left behind.
+
+Generated media for tests (`src/test/video-fixtures.ts`) is built with ffmpeg once into the container's temp dir and reused. Storage objects created by tests are removed with `cleanStorage(prefix)` (`src/test/storage.ts`).
+
+## Environment Variables
+
+Validated by `src/config/env.validation.ts`; defaults in `.env.example`.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `STORAGE_ENDPOINT` | `http://minio:9000` | Used by the API and the worker inside the Compose network |
+| `STORAGE_PUBLIC_ENDPOINT` | `http://localhost:9000` | Host in the presigned URLs handed to the browser |
+| `STORAGE_REGION` | `us-east-1` | |
+| `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | — (required) | Also the MinIO root credentials in Compose |
+| `STORAGE_BUCKET` | `streamtube` | Created by `storage-init` |
+| `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | |
+| `QUEUE_PREFIX` | `bull` | BullMQ key prefix; tests override it |
+
+## OpenAPI Export
+
+`npm run openapi:export` runs through ts-node, which skips the `@nestjs/swagger` CLI plugin, so DTOs inferred from `class-validator` come out empty. To regenerate `openapi.json` with the plugin applied:
+
+```bash
+docker compose exec nestjs-api sh -c 'npx nest build && node -e "require(\"./dist/openapi-export\").exportSpec()"'
+```
 
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
@@ -147,6 +187,9 @@ Whenever possible, prefer storing only the bare address in `.env` and composing 
 NestJS with standard module structure. Source lives in `src/`, compiled output in `dist/`.
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
+- `CoreModule` (`src/core/`) holds the global config, TypeORM and BullMQ connection; both `AppModule` (API) and `WorkerModule` (`src/worker/`, entrypoint `src/worker.ts`) import it
+- `src/videos/` is the HTTP side (upload, playback); `src/videos/processing/` is what the worker runs. `VideoProcessor` is registered only in `WorkerModule`, so the API process never consumes the queue
+- `src/storage/` wraps the S3 client (multipart, presigned URLs) for both processes
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
 ## Code Conventions

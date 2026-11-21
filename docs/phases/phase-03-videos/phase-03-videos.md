@@ -30,7 +30,7 @@ Entregar o upload de vídeos de até 10GB direto para o object storage, com pré
 2. Adicionar o serviço `redis` com `redis:7.4-alpine`, volume nomeado e healthcheck `redis-cli ping` (per `phase-03-videos/TD-01`)
 3. Fazer `nestjs-api` depender de `minio` (healthy), `storage-init` (completed) e `redis` (healthy)
 4. Instalar `ffmpeg` no `Dockerfile.dev` (pacote Debian, traz `ffprobe`) (per `phase-03-videos/TD-04`)
-5. Instalar `@nestjs/bullmq@^12.0.2`, `bullmq@^6.7.7`, `@aws-sdk/client-s3@^3.1172.0` e `@aws-sdk/s3-request-presigner@^3.1172.0` no `package.json`
+5. Instalar `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7`, `ioredis@^5.11.1`, `@aws-sdk/client-s3@^3.1172.0` e `@aws-sdk/s3-request-presigner@^3.1172.0` no `package.json`
 
 **Tests:** _(empty — Infra)_
 

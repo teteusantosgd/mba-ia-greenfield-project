@@ -10,7 +10,7 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express) and the video worker (second entrypoint, `src/worker.ts`). Contains modules for users, channels, videos, etc.
 - `docs/` — Project documentation, architecture diagrams, and planning.
 - `next-frontend/` (Next.js) — not yet initialized
 
@@ -20,11 +20,20 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Video Worker** (NestJS standalone context + FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (BullMQ on Redis) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Videos
+
+- **Upload:** the API never receives the file. `POST /videos` saves the video as `draft` and opens an S3 multipart upload; the client asks for presigned part URLs and sends 16 MiB parts straight to MinIO; `POST /videos/:id/upload/complete` assembles the object, moves the video to `processing` and publishes a `process-video` job. Interrupted uploads resume from `GET /videos/:id/upload`.
+- **Processing:** the `video-worker` container reads the file over a presigned URL with `ffprobe`/`ffmpeg`, stores duration, metadata and a JPEG thumbnail, and ends the video in `ready` or `failed` (`failure_reason`). Only browser-playable MP4 and WebM are accepted.
+- **Delivery:** stream, download and thumbnail answer `302` to a presigned MinIO URL; the storage serves `Range` requests.
+- **Status in the database is the source of truth.** A periodic job in the worker re-enqueues videos stuck in `processing`.
+
+Decisions: `docs/decisions/technical-decisions-phase-03-videos.md`.
 
 ## Docker Networking
 

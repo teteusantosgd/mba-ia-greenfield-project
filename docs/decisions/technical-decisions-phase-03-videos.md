@@ -45,7 +45,10 @@ _Inherited constraints (not reopened here):_ object storage is S3-compatible (Mi
 **Recommendation:** **Option A (BullMQ + Redis)** — the workload is a job queue (one unit of work, retried until done), not pub/sub messaging; BullMQ gives retries, backoff, stalled-job recovery and `jobId` deduplication without custom code and has the only first-party Nest integration of the three. The cost is one Redis container, which the diagram already anticipates as a separate queue component.
 
 **Decision:** A (BullMQ + Redis via `@nestjs/bullmq`)
-**Libraries:** `@nestjs/bullmq@^12.0.2`, `bullmq@^6.7.7`
+**Libraries:** `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7`, `ioredis@^5.11.1`
+
+**Revisions:**
+- 2026-11-21 — Libraries changed to `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7` and `ioredis@^5.11.1`. `@nestjs/bullmq` 12.x ships as ESM only (`"type": "module"`), and the project's Jest setup (ts-jest, CommonJS) cannot load it; 11.0.5 is CommonJS and declares peers `@nestjs/core` ^11 and `bullmq` ^6. `bullmq` 6 made `ioredis` an optional peer, so it is now a direct dependency. Rationale: found while implementing SI-03.4.
 
 ---
 

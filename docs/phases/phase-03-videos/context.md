@@ -50,7 +50,7 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | technical-decisions-phase-03-videos.md | Backend | Job Queue Technology | decided | A (BullMQ + Redis via `@nestjs/bullmq`) | `@nestjs/bullmq@^12.0.2`, `bullmq@^6.7.7` |
+| phase-03-videos/TD-01 | technical-decisions-phase-03-videos.md | Backend | Job Queue Technology | decided | A (BullMQ + Redis via `@nestjs/bullmq`) | `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7`, `ioredis@^5.11.1` |
 | phase-03-videos/TD-02 | technical-decisions-phase-03-videos.md | Cross-layer | Upload Protocol for Files up to 10GB | decided | A (S3 multipart with presigned part URLs) | `@aws-sdk/client-s3@^3.1172.0`, `@aws-sdk/s3-request-presigner@^3.1172.0` |
 | phase-03-videos/TD-03 | technical-decisions-phase-03-videos.md | Backend | Video Worker Runtime | decided | A (Second entrypoint of `nestjs-project` in its own container) | — |
 | phase-03-videos/TD-04 | technical-decisions-phase-03-videos.md | Backend | Metadata Extraction and Thumbnail Generation | decided | A (`ffprobe`/`ffmpeg` via `child_process` over presigned GET URL) | — |
@@ -84,7 +84,10 @@ _Source files:_
 
 **Recommendation:** the workload is a job queue (one unit of work, retried until done), not pub/sub messaging; BullMQ gives retries, backoff, stalled-job recovery and `jobId` deduplication without custom code and has the only first-party Nest integration of the three. The cost is one Redis container, which the diagram already anticipates as a separate queue component.
 
-**Libraries:** `@nestjs/bullmq@^12.0.2`, `bullmq@^6.7.7`
+**Libraries:** `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7`, `ioredis@^5.11.1`
+
+**Revisions:**
+- 2026-11-21 — Libraries changed to `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.7` and `ioredis@^5.11.1`. `@nestjs/bullmq` 12.x ships as ESM only (`"type": "module"`), and the project's Jest setup (ts-jest, CommonJS) cannot load it; 11.0.5 is CommonJS and declares peers `@nestjs/core` ^11 and `bullmq` ^6. `bullmq` 6 made `ioredis` an optional peer, so it is now a direct dependency. Rationale: found while implementing SI-03.4.
 
 ### phase-03-videos/TD-02
 

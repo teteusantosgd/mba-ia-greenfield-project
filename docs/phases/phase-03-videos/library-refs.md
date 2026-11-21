@@ -1,7 +1,7 @@
 ---
 libs:
   "@nestjs/bullmq":
-    version: "^12.0.2"
+    version: "^11.0.5"
     context7_id: "/nestjs/docs.nestjs.com"
     fetched_at: "2026-11-21T18:42:00-03:00"
   bullmq:
@@ -23,7 +23,7 @@ sources_mtime:
 
 # phase-03-videos — Library References
 
-Distilled docs for the libraries decided in this phase, pulled via Context7 on 2026-11-21. Versions checked against the registry the same day: `@nestjs/bullmq` 12.0.2 declares peers `@nestjs/common`/`@nestjs/core` `^10 || ^11 || ^12` and `bullmq` `^3 … ^6`, so it runs on the installed NestJS 11; `@aws-sdk/client-s3` 3.1172.0 requires Node >= 20 (container runs Node 25). No library is added for ffmpeg (`node:child_process`) or for the public id (`node:crypto`).
+Distilled docs for the libraries decided in this phase, pulled via Context7 on 2026-11-21. Versions checked against the registry the same day: `@nestjs/bullmq` 11.0.5 declares peers `@nestjs/common`/`@nestjs/core` `^10 || ^11` and `bullmq` `^3 … ^6`, so it runs on the installed NestJS 11 (12.x is ESM only and does not load under the project's CommonJS Jest setup — see the Revision on TD-01); `bullmq` 6 keeps `ioredis` as an optional peer, installed explicitly; `@aws-sdk/client-s3` 3.1172.0 requires Node >= 20 (container runs Node 25). No library is added for ffmpeg (`node:child_process`) or for the public id (`node:crypto`).
 
 ## @nestjs/bullmq
 
