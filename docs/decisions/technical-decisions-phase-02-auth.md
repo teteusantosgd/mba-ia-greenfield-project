@@ -238,6 +238,9 @@ _Subprojects in scope:_
 
 **Decision:** A (@nestjs/throttler)
 
+**Revisions:**
+- 2026-11-21 — Scope of the throttler corrected: `ThrottlerGuard` is registered with the `APP_GUARD` token in `AuthModule`, which makes it a global guard, not one scoped to the module. The 10 req/min limit stays as brute-force protection for the auth endpoints; routes that legitimately issue bursts of calls opt out with `@SkipThrottle()` (first case: the videos routes of phase 03). Rationale: raised as `ICC-1` in `docs/phases/phase-03-videos/validation.md`; a multi-part upload of up to 10GB would be rejected mid-way by an auth-sized limit.
+
 ---
 
 ## TD-09: Refresh Token Format
