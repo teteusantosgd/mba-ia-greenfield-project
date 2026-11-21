@@ -118,3 +118,68 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS — UPLOAD, PROCESSAMENTO E REPRODUÇÃO
+# ─────────────────────────────────────────────
+# Fluxo: 10 cria o rascunho → 11 pede as URLs das partes → o cliente envia
+# cada parte com PUT direto ao MinIO, com exatamente `size` bytes no corpo
+# (ex.: curl -X PUT --data-binary @parte-1 "<url>") → 13 conclui → o
+# video-worker processa → 14 até status "ready" → 15/16/17.
+# As URLs de parte, stream, download e thumbnail não usam o Bearer.
+
+@videoId = {{startUpload.response.body.$.id}}
+
+### 10. Iniciar upload (pré-cadastra o vídeo como draft)
+# @name startUpload
+POST {{baseUrl}}/videos
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "filename": "aula.mp4",
+  "size_bytes": 52428800,
+  "content_type": "video/mp4"
+}
+
+
+### 11. URLs pré-assinadas das partes (até 100 por chamada)
+POST {{baseUrl}}/videos/{{videoId}}/upload/part-urls
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "part_numbers": [1, 2, 3, 4]
+}
+
+
+### 12. Estado do upload (partes já recebidas, para retomar)
+GET {{baseUrl}}/videos/{{videoId}}/upload
+Authorization: Bearer {{accessToken}}
+
+
+### 13. Concluir upload e enfileirar o processamento
+POST {{baseUrl}}/videos/{{videoId}}/upload/complete
+Authorization: Bearer {{accessToken}}
+
+
+### 14. Consultar o vídeo (status, duração, metadados)
+GET {{baseUrl}}/videos/{{videoId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 15. Stream (302 para URL assinada que aceita Range)
+GET {{baseUrl}}/videos/{{videoId}}/stream
+Authorization: Bearer {{accessToken}}
+
+
+### 16. Download do arquivo original (302)
+GET {{baseUrl}}/videos/{{videoId}}/download
+Authorization: Bearer {{accessToken}}
+
+
+### 17. Thumbnail JPEG (302)
+GET {{baseUrl}}/videos/{{videoId}}/thumbnail
+Authorization: Bearer {{accessToken}}
