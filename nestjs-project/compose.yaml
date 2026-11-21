@@ -14,8 +14,33 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
       storage-init:
         condition: service_completed_successfully
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # Compiled and started with exec so node is PID 1 and gets the SIGTERM:
+    # npm and `nest start --watch` do not pass it on, and the worker needs it
+    # to finish the active job. After changing worker code, restart the service.
+    command: sh -c "npx nest build --path tsconfig.worker.json && exec node dist-worker/worker.js"
+    # Enough for ffprobe (60 s) and ffmpeg (120 s) to finish the active job.
+    stop_grace_period: 3m
+    # On a fresh checkout node_modules only exists after `npm install` runs in
+    # nestjs-api; until then the worker exits and is restarted.
+    restart: unless-stopped
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -75,6 +100,8 @@ services:
     image: redis:7.4-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -83,3 +110,4 @@ services:
 
 volumes:
   minio-data:
+  redis-data:
