@@ -16,7 +16,7 @@ This is a monorepo with two main areas:
 
 ## Architecture (C4 Container Diagram)
 
-See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
+See `docs/diagrams/software-arch.mermaid` for the full diagram. It is the target architecture: the frontend has no video UI yet, and comments and likes arrive in phase 06. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
 - **API** (Nest.js) → business rules, auth, reads/writes DB, signs storage URLs (video bytes never pass through it), publishes jobs to queue, sends emails
@@ -31,7 +31,7 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Upload:** the API never receives the file. `POST /videos` saves the video as `draft` and opens an S3 multipart upload; the client asks for presigned part URLs and sends 16 MiB parts straight to MinIO; `POST /videos/:id/upload/complete` assembles the object, moves the video to `processing` and publishes a `process-video` job. Interrupted uploads resume from `GET /videos/:id/upload`.
 - **Processing:** the `video-worker` container reads the file over a presigned URL with `ffprobe`/`ffmpeg`, stores duration, metadata and a JPEG thumbnail, and ends the video in `ready` or `failed` (`failure_reason`). Only browser-playable MP4 and WebM are accepted.
 - **Delivery:** stream, download and thumbnail answer `302` to a presigned MinIO URL; the storage serves `Range` requests.
-- **Access:** every `/videos` route requires the owner's Bearer token and answers `404` to anyone else. Anonymous and public access belongs to later phases.
+- **Access:** every `/videos` route requires a Bearer token (`401` without one). `POST /videos` creates the video in the caller's channel; the routes by id answer only to the channel that owns the video and return `404` to anyone else. Anonymous and public access belongs to later phases.
 - **Status in the database is the source of truth.** A periodic job in the worker re-enqueues videos stuck in `processing`.
 
 Decisions: `docs/decisions/technical-decisions-phase-03-videos.md`.

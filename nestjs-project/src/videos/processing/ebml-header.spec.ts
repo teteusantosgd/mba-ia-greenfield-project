@@ -34,6 +34,13 @@ describe('readDocType', () => {
     expect(readDocType(Buffer.from('ftypisom'))).toBeNull();
   });
 
+  it('returns null when a child element overruns the declared header size', () => {
+    const header = ebmlHeader([0x42, 0x82, 0x84, ...ascii('webm')]);
+    header[4] = 0x80 | 5;
+
+    expect(readDocType(header)).toBeNull();
+  });
+
   it('returns null when the header is cut before the DocType ends', () => {
     const header = ebmlHeader([0x42, 0x82, 0x84, ...ascii('webm')]);
 

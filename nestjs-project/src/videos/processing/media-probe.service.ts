@@ -153,7 +153,8 @@ export class MediaProbeService {
       const jpeg = await this.extractFrame(url, streamIndex, position);
       if (jpeg.length > 0) return jpeg;
     }
-    throw new Error('ffmpeg produced no frame for the thumbnail');
+    // ffmpeg exited cleanly but decoded nothing at either position.
+    throw new InvalidMediaError();
   }
 
   private async extractFrame(

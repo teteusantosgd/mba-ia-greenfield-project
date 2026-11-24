@@ -161,7 +161,7 @@ Segurança: senhas com **Argon2**, **JWT** com `JwtAuthGuard` global (opt-out vi
 
 ### Upload e processamento de vídeos (Fase 03)
 
-O arquivo vai do cliente direto ao MinIO, em partes de 16 MiB, até 10 GiB. O vídeo é pré-cadastrado como rascunho no início do upload. Depois que o upload termina, o `video-worker` extrai duração, metadados e thumbnail. O status segue `draft → processing → ready` ou `failed`. Cada vídeo tem um id público único de 11 caracteres. Todas as rotas exigem o token do dono do vídeo.
+O arquivo vai do cliente direto ao MinIO, em partes de 16 MiB, até 10 GiB. O vídeo é pré-cadastrado como rascunho no início do upload. Depois que o upload termina, o `video-worker` extrai duração, metadados e thumbnail. O status segue `draft → processing → ready` ou `failed`. Cada vídeo tem um id público único de 11 caracteres. Todas as rotas exigem token; as rotas por id só respondem ao canal dono do vídeo (`404` para os demais).
 
 | Método & Rota | Descrição |
 |---------------|-----------|
@@ -225,7 +225,7 @@ green-field-ia-project/
 |------|-----------|--------|
 | **01** | Configuração Base do Projeto | ✅ Concluída |
 | **02** | Cadastro, Login e Gerenciamento de Conta | ✅ Concluída |
-| **03** | Upload e Processamento de Vídeos | ⏳ Planejada |
+| **03** | Upload e Processamento de Vídeos | ✅ Concluída (backend) |
 | **04** | Gerenciamento de Vídeos e Canal | ⏳ Planejada |
 | **05** | Página de Visualização do Vídeo | ⏳ Planejada |
 | **06** | Interações Sociais (Likes, Comentários, Inscrições) | ⏳ Planejada |
@@ -240,6 +240,7 @@ Detalhes completos em `docs/project-plan.md`.
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, React Hook Form + Zod, iron-session, openapi-fetch |
 | Backend | NestJS 11, TypeScript, TypeORM, JWT, Argon2, Mailer (Handlebars) |
 | Banco de Dados | PostgreSQL 17 |
+| Vídeos | MinIO (S3, `@aws-sdk/client-s3`), BullMQ sobre Redis, FFmpeg/ffprobe |
 | E-mail (dev) | Mailpit |
 | Containerização | Docker, Docker Compose |
 | Testes | Jest, Supertest (backend); Vitest, MSW, Playwright (frontend) |

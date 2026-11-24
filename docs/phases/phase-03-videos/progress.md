@@ -142,6 +142,12 @@ Two reviewers checked the branch against the acceptance criteria and the automat
   - README: phase 03 infra, first-run sequence and endpoints.
   - Revisions on TD-02 (no client ETags), TD-04 (`-format_whitelist` and DocType) and TD-08 (CORS without `ExposeHeaders`), mirrored in `context.md`.
   - A revision note on SI-03.10.
+- **Second round:**
+  - The root `CLAUDE.md` and the README tell `401` (no token) from `404` (another channel's video) and mark the C4 diagram as the target architecture.
+  - `software-arch.mermaid` shows the client sending parts to the storage and the API signing URLs.
+  - ffmpeg finishing without a frame at both positions fails the video as `invalid_media`.
+  - The EBML parser rejects a child element that overruns the declared header size.
+  - The README lists phase 03 as done.
 - **Not changed:** `src/storage/storage.module.spec.ts`, the module compilation test, stays. It is listed in SI-03.2 and every module of phases 01/02 has the same test.
 
 ## Final verification

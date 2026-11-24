@@ -39,6 +39,7 @@ export function readDocType(buf: Buffer): string | null {
     if (!id || !size) return null;
 
     const dataStart = at + id.length + size.length;
+    if (dataStart + size.value > end) return null;
     if (id.value === DOC_TYPE_ID) {
       if (dataStart + size.value > buf.length) return null;
       const docType = buf.subarray(dataStart, dataStart + size.value);
