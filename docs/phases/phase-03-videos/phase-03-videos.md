@@ -3,9 +3,9 @@ kind: phase
 name: phase-03-videos
 test_specs_aware: true
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-11-21T18:42:10-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-11-24T20:07:50-03:00"
   docs/phases/phase-03-videos/library-refs.md: "2026-11-21T18:41:57-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-21T18:41:24-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-24T20:07:02-03:00"
   docs/decisions/technical-decisions-phase-02-auth.md: "2026-11-21T18:41:24-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-11-18T22:10:12-03:00"
 ---
@@ -301,6 +301,8 @@ Entregar o upload de vídeos de até 10GB direto para o object storage, com pré
 3. Criar `src/worker/worker.module.ts` (`CoreModule` + `VideoProcessingModule`) e `src/worker.ts` — `NestFactory.createApplicationContext(WorkerModule)` com `enableShutdownHooks()` (per `phase-03-videos/TD-03`)
 4. Criar `tsconfig.worker.json` (estende `tsconfig.build.json`, `outDir: ./dist-worker`) e o script `start:worker` (`nest start --watch --entryFile worker --path tsconfig.worker.json`) — saída separada para o worker não apagar o `dist/` da API ao recompilar; excluir `dist-worker` do `tsconfig.json`, do ESLint e do Git; `start:worker:prod` roda `node dist/worker` a partir do `npm run build` normal
 5. Adicionar o serviço `video-worker` ao `compose.yaml` — mesmo build e volume do `nestjs-api`, `command: npm run start:worker`, `restart: unless-stopped` (num checkout limpo ele reinicia até o `npm install` feito no `nestjs-api` aparecer no volume), dependente de `db`, `redis` e `minio` saudáveis
+
+> **Revision (2026-11-24, implementation):** actions 2 and 5 changed while implementing. `VideoProcessor` is registered in `WorkerModule`, not in `VideoProcessingModule`; otherwise any test module importing `VideoProcessingModule` would start a consumer and take jobs from the Compose worker. The `video-worker` command is `sh -c "npx nest build --path tsconfig.worker.json && exec node dist-worker/worker.js"` with `stop_grace_period: 3m`, because `npm run start:worker` never delivered `SIGTERM` to node. Details in `progress.md` (SI-03.10 and the code review section).
 
 **Tests:**
 

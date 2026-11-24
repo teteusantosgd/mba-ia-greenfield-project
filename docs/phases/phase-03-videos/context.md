@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-11-18T22:09:47-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-21T18:41:24-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-24T20:07:02-03:00"
   docs/decisions/technical-decisions-phase-02-auth.md: "2026-11-21T18:41:24-03:00"
   docs/phases/phase-03-videos/library-refs.md: "2026-11-21T18:41:57-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-11-18T22:10:12-03:00"
@@ -95,6 +95,9 @@ _Source files:_
 
 **Libraries:** `@aws-sdk/client-s3@^3.1172.0`, `@aws-sdk/s3-request-presigner@^3.1172.0`
 
+**Revisions:**
+- 2026-11-24 — The client does not collect `ETag`s. On completion the API lists the parts the storage already holds (`ListParts`) and completes the upload with them, so the contract has no ETag field and the bucket CORS does not need to expose that header (the Cons of Option A no longer apply to this design). Rationale: the plan's API contract for `POST /videos/:id/upload/complete` (SI-03.7) fixed this, and it keeps resume and completion on the same source of truth.
+
 ### phase-03-videos/TD-03
 
 **Recommendation:** matches the diagram's separate worker container while keeping a single source of truth for the entity and the storage/queue configuration. ffmpeg heavy lifting happens in a child process (TD-04), so the Node event loop of the worker stays free regardless of the option.
@@ -106,6 +109,9 @@ _Source files:_
 **Recommendation:** two fixed command lines do not justify a deprecated wrapper, and reading through a presigned URL avoids copying the whole file to the worker's disk. The URL is signed for the storage's internal endpoint, since the worker is the one fetching it. Both processes run with a time limit and with FFmpeg's input protocols restricted, because the input is user-supplied media that may reference other resources. The thumbnail is a JPEG from a frame early in the video rather than the very first one; the extracted metadata covers duration, dimensions, codecs, container and bitrate.
 
 **Libraries:** —
+
+**Revisions:**
+- 2026-11-24 — Besides the input protocols, both processes restrict the input demuxers to `mov,matroska` (`-format_whitelist`). With protocols alone, an HLS playlist uploaded as `.mp4` made ffprobe fetch a segment from an arbitrary host. Files in any other container now fail as `unsupported_format`. ffprobe reports Matroska and WebM with the same format name, so the worker reads the `DocType` from the file's EBML header to tell them apart. Rationale: found in the code review after SI-03.13 (recorded in `phase-03-videos/progress.md`).
 
 ### phase-03-videos/TD-05
 
@@ -130,6 +136,9 @@ _Source files:_
 **Recommendation:** a single private bucket keeps authorization in one place (the API decides, the storage enforces via signature) and avoids exposing draft thumbnails. The internal/public endpoint split is required by presigned URLs in a Compose network: containers reach the storage by service name, browsers by the published host. Browser uploads additionally need the storage's CORS to allow the frontend origin and expose `ETag`.
 
 **Libraries:** `@aws-sdk/client-s3@^3.1172.0`, `@aws-sdk/s3-request-presigner@^3.1172.0`
+
+**Revisions:**
+- 2026-11-24 — The CORS rule only allows the frontend origin; exposing `ETag` is not needed because the client does not read it (see the TD-02 revision).
 
 ### phase-03-videos/TD-09
 

@@ -9,7 +9,7 @@
 - **Observations:**
   - `npm install` resolved `@aws-sdk/*` to `^3.1175.0` (newest at install time, same major line as the plan).
   - `.env` received the new `STORAGE_*` / `REDIS_*` / `QUEUE_PREFIX` keys copied from `.env.example`.
-  - After the Sol review: `redis` got a named volume (`redis-data`), and `nestjs-api` also waits for `minio` healthy, as the plan states.
+  - After the first code review: `redis` got a named volume (`redis-data`), and `nestjs-api` also waits for `minio` healthy, as the plan states.
   - Redis loses the reconciliation scheduler if its data goes away; the worker registers it again on its next start.
 
 ### SI-03.2 — Configuração e serviço de object storage
@@ -17,8 +17,8 @@
 - **Tests:** 18 passing (storage service integration 6, storage module 1, env schema 11)
 - **Observations:**
   - The wrong-length PUT is rejected because `content-length` is in `X-Amz-SignedHeaders` (checked on a generated URL).
-  - `src/config/env.validation.integration-spec.ts` lines 37/39 carry two `no-unsafe-*` lint errors from before this phase; the new tests in the file avoid the pattern.
-  - After the Sol review: `EntityTooSmall` (middle part under 5 MiB) maps to `InvalidPartsError` like `InvalidPart`; `cleanStorage` fails when `DeleteObjects` reports per-key errors; the internal S3 client is named `internalClient`; the wrong-length test asserts `SignatureDoesNotMatch`.
+  - `src/config/env.validation.integration-spec.ts` had two `no-unsafe-*` lint errors from before this phase; the new tests in the file avoid the pattern, and `feature/lint-cleanup` fixed the old ones.
+  - After the first code review: `EntityTooSmall` (middle part under 5 MiB) maps to `InvalidPartsError` like `InvalidPart`; `cleanStorage` fails when `DeleteObjects` reports per-key errors; the internal S3 client is named `internalClient`; the wrong-length test asserts `SignatureDoesNotMatch`.
   - Not applied: translating `NoSuchUpload` on abort. MinIO answers 204 when aborting an upload that no longer exists, so the branch cannot be exercised, and no caller handles it.
 
 ### SI-03.3 — Entidade Video e migration
@@ -94,7 +94,7 @@
 - **Observations:**
   - Root `CLAUDE.md` still says `next-frontend/` is not initialized, which is stale since phase 02 of the frontend; out of scope here.
 
-## Final verification (before the second Sol review)
+## Final verification (before the second code review)
 
 - `npx jest --runInBand`: 36 suites, 221 tests passing
 - `npm run test:e2e`: 5 suites, 77 tests passing
@@ -102,7 +102,7 @@
 - `npx nest build`: exit 0, `dist/main.js` and `dist/worker.js` present
 - `eslint` (without `--fix`): 150 errors, all in files that predate this phase (auth, channels, common/filters, mail, users, `env.validation.integration-spec.ts`, `create-test-data-source.ts`, `test/auth.e2e-spec.ts`); zero in files added or changed by this phase. `npm run lint` therefore still exits non-zero — follow-up for a separate PR.
 
-## Second Sol review (SI-03.3 to SI-03.13) — applied
+## Second code review (SI-03.3 to SI-03.13) — applied
 
 - **FFmpeg input:** `-format_whitelist mov,matroska` on ffprobe and ffmpeg. Without it, an HLS playlist uploaded as `.mp4` made ffprobe fetch a segment from an arbitrary host (reproduced in the container). AVI and playlists now fail with `UnsupportedContainerError` → `unsupported_format`.
 - **Errors without the signed URL:** stderr is only used to classify; messages are fixed (`timed out`, `got HTTP 404 from the storage`, `exited with code N`), with timeout, missing binary and buffer overflow checked before media classification.
@@ -117,11 +117,38 @@
 - **Smaller:** `%` replaced in the ASCII `filename` fallback; JSDoc of `requeueStuckVideos` and the CoreModule comment removed; reconciliation log reports candidates, not re-enqueued jobs; ffmpeg arguments written as explicit arrays.
 - **Not applied — dedicated test database and bucket.** The shared `streamtube` database with `cleanAllTables` is the convention inherited from phases 01/02 (`nestjs-project/CLAUDE.md` → Test execution); moving every suite to its own database is a separate task. The Compose worker cannot race the reconciliation spec: a stuck fixture row takes three attempts and over 30 s to change status, and the spec reads it within milliseconds.
 
-## Final verification (after the second Sol review)
+## Verification after the second code review
 
 - `npx jest --runInBand`: 36 suites, 231 tests passing
 - `npm run test:e2e`: 5 suites, 78 tests passing
 - `npx tsc --noEmit`: exit 0
 - `npx nest build`: exit 0, `dist/main.js` and `dist/worker.js` present; `openapi.json` re-exported from the build
-- `eslint`: 150 errors, all in the 11 files that predate this phase; none in files of this phase. `npm run lint` still exits non-zero — follow-up for a separate PR.
+- `eslint`: 150 errors, all in the 11 files that predate this phase; none in files of this phase. Fixed by `feature/lint-cleanup` (see the delivery review below).
 
+## Delivery review (against the challenge acceptance criteria) — applied
+
+Two reviewers checked the branch against the acceptance criteria and the automatic-failure list of the challenge.
+
+- **Lint:** `npm run lint` failed on 150 errors from phases 01/02. They are fixed in `feature/lint-cleanup` (its own PR to `dev`), on which this branch is rebased. That branch types the mocks and response bodies in the old specs, reads `code`/`detail` from `driverError` in `ChannelsService`, and turns `unbound-method` off only in test files, as the typescript-eslint docs recommend for Jest.
+- **`npm test`:** now passes `--runInBand`, like `test:e2e`. In parallel the integration suites clean the shared tables under each other and fail with FK violations.
+- **`POST /videos` (201):** `duration_seconds`, `metadata` and `failure_reason` were missing from the body. `insert()` leaves nullable columns without a default `undefined`. The mapper now returns `null` for them, and the e2e asserts the three keys.
+- **WebM DocType:** read with an EBML header parser (`src/videos/processing/ebml-header.ts`). It handles multi-byte sizes and a DocType anywhere in the first KiB, with the same timeout as ffprobe. It replaces the 64-byte scan.
+- **Thumbnail:** an `InvalidMediaError` from ffmpeg (readable headers, undecodable frames) fails the video as `invalid_media` instead of being retried.
+- **Reconciliation scheduler:** its jobs are removed on completion and failure, so Redis does not keep one per run.
+- **OpenAPI:** the `401` response is declared once on `VideosController` and applies to all eight routes. `openapi.json` was re-exported.
+- **10 GiB limit:** e2e for exactly `MAX_VIDEO_SIZE_BYTES`: 201 with 640 parts and signed URLs for parts 639–640.
+- **Docs:**
+  - Root `CLAUDE.md`: current state of `next-frontend/`, the API signing storage URLs instead of uploading, and owner-only access to `/videos`.
+  - README: phase 03 infra, first-run sequence and endpoints.
+  - Revisions on TD-02 (no client ETags), TD-04 (`-format_whitelist` and DocType) and TD-08 (CORS without `ExposeHeaders`), mirrored in `context.md`.
+  - A revision note on SI-03.10.
+- **Not changed:** `src/storage/storage.module.spec.ts`, the module compilation test, stays. It is listed in SI-03.2 and every module of phases 01/02 has the same test.
+
+## Final verification
+
+- `npx tsc --noEmit`: exit 0
+- `npm run lint`: exit 0, 0 errors, 23 warnings (`no-unsafe-argument`, configured as `warn`); `--fix` changed no file
+- `npm test`: 37 suites, 236 tests passing
+- `npm run test:e2e`: 5 suites, 79 tests passing
+- `npx nest build`: exit 0, `dist/main.js` and `dist/worker.js` present
+- `video-worker` restarted on this code without errors; no `X-Amz-Signature` in its log

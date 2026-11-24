@@ -87,6 +87,9 @@ _Inherited constraints (not reopened here):_ object storage is S3-compatible (Mi
 **Decision:** A (S3 multipart with presigned part URLs)
 **Libraries:** `@aws-sdk/client-s3@^3.1172.0`, `@aws-sdk/s3-request-presigner@^3.1172.0`
 
+**Revisions:**
+- 2026-11-24 — The client does not collect `ETag`s. On completion the API lists the parts the storage already holds (`ListParts`) and completes the upload with them, so the contract has no ETag field and the bucket CORS does not need to expose that header (the Cons of Option A no longer apply to this design). Rationale: the plan's API contract for `POST /videos/:id/upload/complete` (SI-03.7) fixed this, and it keeps resume and completion on the same source of truth.
+
 ---
 
 ## TD-03: Video Worker Runtime
@@ -153,6 +156,9 @@ _Inherited constraints (not reopened here):_ object storage is S3-compatible (Mi
 **Recommendation:** **Option A** — two fixed command lines do not justify a deprecated wrapper, and reading through a presigned URL avoids copying the whole file to the worker's disk. The URL is signed for the storage's internal endpoint, since the worker is the one fetching it. Both processes run with a time limit and with FFmpeg's input protocols restricted, because the input is user-supplied media that may reference other resources. The thumbnail is a JPEG from a frame early in the video rather than the very first one; the extracted metadata covers duration, dimensions, codecs, container and bitrate.
 
 **Decision:** A (`ffprobe`/`ffmpeg` via `child_process`, reading from a presigned GET URL)
+
+**Revisions:**
+- 2026-11-24 — Besides the input protocols, both processes restrict the input demuxers to `mov,matroska` (`-format_whitelist`). With protocols alone, an HLS playlist uploaded as `.mp4` made ffprobe fetch a segment from an arbitrary host. Files in any other container now fail as `unsupported_format`. ffprobe reports Matroska and WebM with the same format name, so the worker reads the `DocType` from the file's EBML header to tell them apart. Rationale: found in the code review after SI-03.13 (recorded in `phase-03-videos/progress.md`).
 
 ---
 
@@ -284,6 +290,9 @@ _Inherited constraints (not reopened here):_ object storage is S3-compatible (Mi
 
 **Decision:** A (One private bucket, keys namespaced by video id)
 **Libraries:** `@aws-sdk/client-s3@^3.1172.0`, `@aws-sdk/s3-request-presigner@^3.1172.0`
+
+**Revisions:**
+- 2026-11-24 — The CORS rule only allows the frontend origin; exposing `ETag` is not needed because the client does not read it (see the TD-02 revision).
 
 ---
 

@@ -42,12 +42,12 @@ Contém os fundamentos visuais do StreamTube — tokens (cores, tipografia, espa
 O projeto é um monorepo baseado em containers Docker. Cada subprojeto sobe sua própria stack via `docker compose`.
 
 - **Frontend** (Next.js 16, App Router + React Server Components) — interface da plataforma. Segue o **modelo BFF**: o navegador nunca chama a API NestJS diretamente; todo tráfego passa por Route Handlers same-origin em `app/api/**`, que fazem proxy server-side para a API.
-- **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails e acesso ao banco.
-- **Database** (PostgreSQL 17) — usuários, canais e tokens de autenticação.
+- **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails, acesso ao banco e assinatura das URLs do storage (os bytes dos vídeos não passam pela API).
+- **Database** (PostgreSQL 17) — usuários, canais, tokens de autenticação e vídeos.
 - **Email Service** (Mailpit) — captura os e-mails transacionais (confirmação de conta e recuperação de senha) em uma UI local.
-- **Video Worker** (FFmpeg) — processamento de vídeos *(planejado — Fase 03)*.
-- **Object Storage** (S3/MinIO) — arquivos de vídeo e thumbnails *(planejado — Fase 03)*.
-- **Message Queue** — fila de processamento de vídeos *(planejado — Fase 03)*.
+- **Video Worker** (NestJS + FFmpeg) — container `video-worker`, que lê duração e metadados e gera a thumbnail de cada vídeo enviado.
+- **Object Storage** (MinIO, compatível com S3) — arquivos de vídeo e thumbnails, recebidos direto do cliente por upload multipart com URLs assinadas.
+- **Message Queue** (BullMQ sobre Redis) — fila de processamento de vídeos.
 
 O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.mermaid`.
 
@@ -55,19 +55,25 @@ O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.me
 
 Os dois subprojetos têm stacks Docker **separadas**. Suba primeiro o backend, rode as migrations e depois o frontend.
 
-### 1. Backend (NestJS + PostgreSQL + Mailpit)
+### 1. Backend (NestJS + PostgreSQL + Mailpit + MinIO + Redis + worker)
 
 ```bash
 cd nestjs-project
 
-# Sobe API, banco e Mailpit
-docker compose up -d
+# Variáveis de ambiente (apenas na primeira vez)
+cp .env.example .env
+
+# Sobe API, worker de vídeo, banco, Mailpit, MinIO e Redis
+docker compose up -d --build
 
 # Instala dependências (apenas na primeira vez)
 docker compose exec nestjs-api npm install
 
 # Cria o schema do banco (obrigatório — synchronize está desabilitado)
 docker compose exec nestjs-api npm run migration:run
+
+# O worker reinicia até o node_modules existir; reinicie depois do primeiro install
+docker compose restart video-worker
 
 # Sobe o servidor de desenvolvimento em watch mode
 docker compose exec -d nestjs-api npm run start:dev
@@ -80,6 +86,8 @@ Serviços disponíveis:
 | API NestJS | http://localhost:3000 |
 | PostgreSQL | `localhost:5432` (db/user/senha: `streamtube`) |
 | Mailpit (UI de e-mails) | http://localhost:8025 |
+| MinIO (API S3 / console) | http://localhost:9000 / http://localhost:9001 (login: `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` do `.env`) |
+| Redis (fila BullMQ) | `localhost:6379` |
 | Swagger (opcional) | http://localhost:3000/api/docs — habilite com `SWAGGER_ENABLED=true` |
 
 ### 2. Frontend (Next.js)
@@ -124,7 +132,7 @@ Sufixos: `*.test.ts(x)` (unitário), `*.integration.test.ts(x)` (Route Handlers 
 
 ## ✅ Funcionalidades implementadas
 
-**Fase 01 — Configuração base** e **Fase 02 — Autenticação** estão concluídas (backend + frontend).
+**Fase 01 — Configuração base** e **Fase 02 — Autenticação** estão concluídas (backend + frontend). **Fase 03 — Upload e Processamento de Vídeos** está concluída no backend; a interface de vídeo fica para as próximas fases.
 
 ### Autenticação (Fase 02)
 
@@ -151,6 +159,23 @@ Telas e Route Handlers BFF (`next-frontend`):
 
 Segurança: senhas com **Argon2**, **JWT** com `JwtAuthGuard` global (opt-out via `@Public()`), **rotação de refresh token** com detecção de reuso, **rate limiting** (`ThrottlerGuard`) nos endpoints de auth, e sessão no navegador via **iron-session** (cookies HTTP-only).
 
+### Upload e processamento de vídeos (Fase 03)
+
+O arquivo vai do cliente direto ao MinIO, em partes de 16 MiB, até 10 GiB. O vídeo é pré-cadastrado como rascunho no início do upload. Depois que o upload termina, o `video-worker` extrai duração, metadados e thumbnail. O status segue `draft → processing → ready` ou `failed`. Cada vídeo tem um id público único de 11 caracteres. Todas as rotas exigem o token do dono do vídeo.
+
+| Método & Rota | Descrição |
+|---------------|-----------|
+| `POST /videos` | Cria o rascunho e abre o upload multipart |
+| `POST /videos/:id/upload/part-urls` | Assina as URLs das partes |
+| `GET /videos/:id/upload` | Partes já enviadas, para retomar o upload |
+| `POST /videos/:id/upload/complete` | Conclui o upload e enfileira o processamento |
+| `GET /videos/:id` | Dados do vídeo, status e metadados |
+| `GET /videos/:id/stream` | `302` para a URL assinada; o storage responde `Range` com `206` |
+| `GET /videos/:id/download` | `302` para o arquivo original, como anexo |
+| `GET /videos/:id/thumbnail` | `302` para a thumbnail JPEG |
+
+Decisões técnicas em `docs/decisions/technical-decisions-phase-03-videos.md`; plano e progresso em `docs/phases/phase-03-videos/`.
+
 ## 🛠️ Estrutura do Projeto
 
 ```
@@ -160,7 +185,8 @@ green-field-ia-project/
 │   ├── phases/                          # Planos e implementação por fase
 │   │   ├── phase-01-configuracao-base/
 │   │   ├── phase-02-auth/               # Auth (backend)
-│   │   └── phase-02-auth-frontend/      # Auth (frontend)
+│   │   ├── phase-02-auth-frontend/      # Auth (frontend)
+│   │   └── phase-03-videos/             # Upload e processamento de vídeos
 │   └── diagrams/
 │       └── software-arch.mermaid        # Diagrama de arquitetura (C4)
 ├── nestjs-project/                      # Backend API (NestJS 11)
@@ -169,11 +195,15 @@ green-field-ia-project/
 │   │   ├── users/                       # Entidade e serviço de usuários
 │   │   ├── channels/                    # Canal 1:1 por usuário (nickname do e-mail)
 │   │   ├── mail/                        # Envio de e-mails (templates Handlebars)
+│   │   ├── videos/                      # Upload, entrega e processamento (FFmpeg) de vídeos
+│   │   ├── storage/                     # Cliente S3 (MinIO): multipart e URLs assinadas
+│   │   ├── core/                        # Config, banco e fila compartilhados por API e worker
+│   │   ├── worker/                      # Módulo raiz do worker (entrypoint src/worker.ts)
 │   │   ├── common/                      # Filtros, pipes e exceptions de domínio
 │   │   ├── config/                      # Configs namespaced (Joi)
 │   │   └── database/                    # data-source, migrations e seeds
 │   ├── test/                            # Testes e2e
-│   ├── compose.yaml                     # Docker Compose (API + PostgreSQL + Mailpit)
+│   ├── compose.yaml                     # Docker Compose (API, worker, PostgreSQL, Mailpit, MinIO, Redis)
 │   └── Dockerfile.dev
 ├── next-frontend/                       # Frontend (Next.js 16, App Router)
 │   ├── app/                             # Rotas, layouts, páginas e Route Handlers BFF
