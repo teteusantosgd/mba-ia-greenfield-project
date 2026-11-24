@@ -59,11 +59,20 @@ export class VideoProcessingService {
       return this.markFailed(videoId, check.reason);
     }
 
-    const thumbnail = await this.mediaProbe.extractThumbnail(
-      sourceUrl,
-      check.video.index,
-      probe.durationSeconds * THUMBNAIL_POSITION,
-    );
+    let thumbnail: Buffer;
+    try {
+      thumbnail = await this.mediaProbe.extractThumbnail(
+        sourceUrl,
+        check.video.index,
+        probe.durationSeconds * THUMBNAIL_POSITION,
+      );
+    } catch (error) {
+      // Readable headers, but frames ffmpeg cannot decode.
+      if (error instanceof InvalidMediaError) {
+        return this.markFailed(videoId, FAILURE_REASONS.INVALID_MEDIA);
+      }
+      throw error;
+    }
     const thumbnailKey = `videos/${video.id}/thumbnail.jpg`;
     await this.storage.putObject(thumbnailKey, thumbnail, 'image/jpeg');
 

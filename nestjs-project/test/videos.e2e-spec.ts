@@ -29,7 +29,10 @@ import {
   ProcessVideoJobData,
   VIDEO_QUEUE,
 } from '../src/videos/video-queue.constants';
-import { PART_SIZE_BYTES } from '../src/videos/videos.constants';
+import {
+  MAX_VIDEO_SIZE_BYTES,
+  PART_SIZE_BYTES,
+} from '../src/videos/videos.constants';
 
 const MP4_UPLOAD = {
   filename: 'aula.mp4',
@@ -163,6 +166,9 @@ describe('Videos (e2e)', () => {
         status: 'draft',
         original_filename: 'aula.mp4',
         size_bytes: 52428800,
+        duration_seconds: null,
+        metadata: null,
+        failure_reason: null,
         upload: { part_size: PART_SIZE_BYTES, part_count: 4 },
       });
       expect(body.id).toMatch(/^[A-Za-z0-9_-]{11}$/);
@@ -173,6 +179,25 @@ describe('Videos (e2e)', () => {
         .findOneByOrFail({ email: 'owner@example.com' });
       expect(video.channel.user_id).toBe(owner.id);
       expect(video.upload_id).toEqual(expect.any(String));
+    });
+
+    it('accepts exactly 10 GiB and signs its last part', async () => {
+      const res = await startUpload({
+        ...MP4_UPLOAD,
+        size_bytes: MAX_VIDEO_SIZE_BYTES,
+      }).expect(201);
+      const draft = res.body as StartUploadResponseDto;
+      expect(draft.upload.part_count).toBe(640);
+
+      const urls = await api()
+        .post(`/videos/${draft.id}/upload/part-urls`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ part_numbers: [639, 640] })
+        .expect(201);
+      expect((urls.body as PartUrlsResponseDto).urls).toMatchObject([
+        { part_number: 639, size: PART_SIZE_BYTES },
+        { part_number: 640, size: PART_SIZE_BYTES },
+      ]);
     });
 
     it.each([

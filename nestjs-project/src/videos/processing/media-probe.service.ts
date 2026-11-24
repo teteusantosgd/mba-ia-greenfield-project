@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Injectable } from '@nestjs/common';
+import { readDocType } from './ebml-header';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,6 +14,8 @@ const FORMATS = 'mov,matroska';
 const PROBE_TIMEOUT_MS = 60_000;
 const THUMBNAIL_TIMEOUT_MS = 120_000;
 const MAX_THUMBNAIL_BYTES = 10 * 1024 * 1024;
+// The EBML header holds a handful of short elements; 1 KiB covers it.
+const EBML_HEADER_BYTES = 1024;
 
 export interface ProbeStream {
   index: number;
@@ -90,19 +93,17 @@ function toNumber(value: string | undefined): number | null {
   return value !== undefined && Number.isFinite(parsed) ? parsed : null;
 }
 
-// ffprobe reports Matroska and WebM alike as "matroska,webm". Only the
-// DocType element (ID 0x4282) of the EBML header at the start of the file
-// tells them apart.
+// ffprobe reports Matroska and WebM alike as "matroska,webm"; only the DocType
+// in the EBML header at the start of the file tells them apart.
 async function readMatroskaDocType(url: string): Promise<string | null> {
-  const response = await fetch(url, { headers: { Range: 'bytes=0-63' } });
+  const response = await fetch(url, {
+    headers: { Range: `bytes=0-${EBML_HEADER_BYTES - 1}` },
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Storage answered ${response.status} to the header read`);
   }
-  const header = Buffer.from(await response.arrayBuffer());
-  const at = header.indexOf(Buffer.from([0x42, 0x82]));
-  if (at < 0) return null;
-  const length = header[at + 2] & 0x7f;
-  return header.subarray(at + 3, at + 3 + length).toString('ascii');
+  return readDocType(Buffer.from(await response.arrayBuffer()));
 }
 
 @Injectable()

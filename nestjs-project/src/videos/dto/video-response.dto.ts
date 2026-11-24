@@ -76,9 +76,10 @@ export function toVideoResponse(video: Video): VideoResponseDto {
     original_filename: video.original_filename,
     content_type: video.content_type,
     size_bytes: video.size_bytes,
-    duration_seconds: video.duration_seconds,
-    metadata: video.metadata,
-    failure_reason: video.failure_reason,
+    // insert() leaves nullable columns without a default undefined.
+    duration_seconds: video.duration_seconds ?? null,
+    metadata: video.metadata ?? null,
+    failure_reason: video.failure_reason ?? null,
     created_at: video.created_at,
   };
 }

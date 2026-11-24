@@ -87,6 +87,18 @@ describe('VideoProcessingService', () => {
     );
   });
 
+  it('fails the video as invalid_media when ffmpeg cannot decode a frame', async () => {
+    mediaProbe.extractThumbnail.mockRejectedValue(new InvalidMediaError());
+
+    await service.process('video-1');
+
+    expect(videoRepository.update).toHaveBeenCalledWith(
+      { id: 'video-1', status: VideoStatus.PROCESSING },
+      { status: VideoStatus.FAILED, failure_reason: 'invalid_media' },
+    );
+    expect(storage.putObject).not.toHaveBeenCalled();
+  });
+
   it('fails the video as unsupported_format when browsers cannot play it', async () => {
     mediaProbe.probe.mockResolvedValue({
       ...PLAYABLE_PROBE,

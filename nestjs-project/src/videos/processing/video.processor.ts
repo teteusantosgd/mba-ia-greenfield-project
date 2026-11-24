@@ -30,7 +30,10 @@ export class VideoProcessor
     await this.videoQueue.upsertJobScheduler(
       VIDEO_JOBS.RECONCILE,
       { every: RECONCILE_INTERVAL_MS },
-      { name: VIDEO_JOBS.RECONCILE },
+      {
+        name: VIDEO_JOBS.RECONCILE,
+        opts: { removeOnComplete: true, removeOnFail: true },
+      },
     );
   }
 

@@ -48,6 +48,11 @@ const signedRedirect = {
 @SkipThrottle()
 @ApiTags('videos')
 @ApiBearerAuth('access-token')
+@ApiResponse({
+  status: 401,
+  description: 'Missing or invalid token',
+  schema: errorSchema,
+})
 @Controller('videos')
 export class VideosController {
   constructor(private readonly videosService: VideosService) {}
@@ -63,11 +68,6 @@ export class VideosController {
   @ApiResponse({
     status: 400,
     description: 'Validation failed',
-    schema: errorSchema,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid token',
     schema: errorSchema,
   })
   async startUpload(
