@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import request from 'supertest';
+import request, { Response } from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
@@ -12,6 +12,14 @@ import { VerificationToken } from '../src/auth/entities/verification-token.entit
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+
+interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+}
+
+const errorOf = (res: Response) => (res.body as { error: string }).error;
+const tokensOf = (res: Response) => res.body as TokenPair;
 
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;
@@ -60,12 +68,12 @@ describe('Auth (e2e)', () => {
     password = 'password123',
   ): Promise<string> {
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
     let capturedToken = '';
     jest
-      .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
-        capturedToken = t;
+      .spyOn(authService['mailService'], 'sendConfirmationEmail')
+      .mockImplementationOnce((_email, _name, token) => {
+        capturedToken = token;
+        return Promise.resolve();
       });
     await request(app.getHttpServer())
       .post('/auth/register')
@@ -76,7 +84,7 @@ describe('Auth (e2e)', () => {
   async function registerConfirmAndLogin(
     email: string,
     password = 'password123',
-  ): Promise<{ access_token: string; refresh_token: string }> {
+  ): Promise<TokenPair> {
     const token = await captureConfirmationToken(email, password);
     await request(app.getHttpServer())
       .get('/auth/confirm-email')
@@ -84,10 +92,8 @@ describe('Auth (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email, password });
-    return {
-      access_token: res.body.access_token,
-      refresh_token: res.body.refresh_token,
-    };
+    const { access_token, refresh_token } = tokensOf(res);
+    return { access_token, refresh_token };
   }
 
   describe('POST /auth/register', () => {
@@ -97,8 +103,9 @@ describe('Auth (e2e)', () => {
         .send({ email: 'user@example.com', password: 'password123' })
         .expect(201);
 
-      expect(res.body.id).toBeDefined();
-      expect(res.body.email).toBe('user@example.com');
+      const user = res.body as { id: string; email: string };
+      expect(user.id).toBeDefined();
+      expect(user.email).toBe('user@example.com');
     });
 
     it('returns 409 with EMAIL_ALREADY_EXISTS on duplicate email', async () => {
@@ -111,7 +118,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'dup@example.com', password: 'password456' })
         .expect(409);
 
-      expect(res.body.error).toBe('EMAIL_ALREADY_EXISTS');
+      expect(errorOf(res)).toBe('EMAIL_ALREADY_EXISTS');
     });
 
     it('returns 400 with VALIDATION_ERROR on missing email', async () => {
@@ -120,7 +127,7 @@ describe('Auth (e2e)', () => {
         .send({ password: 'password123' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
 
     it('returns 400 with VALIDATION_ERROR on invalid email format', async () => {
@@ -129,7 +136,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'not-an-email', password: 'password123' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
 
     it('returns 400 with VALIDATION_ERROR when password is too short', async () => {
@@ -138,7 +145,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'user@example.com', password: 'short' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
 
     it('returns 400 with VALIDATION_ERROR on unknown extra fields', async () => {
@@ -151,7 +158,7 @@ describe('Auth (e2e)', () => {
         })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -178,7 +185,7 @@ describe('Auth (e2e)', () => {
         .query({ token })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_TOKEN');
+      expect(errorOf(res)).toBe('INVALID_TOKEN');
     });
 
     it('returns 401 with TOKEN_EXPIRED on an expired token', async () => {
@@ -194,7 +201,7 @@ describe('Auth (e2e)', () => {
         .query({ token })
         .expect(401);
 
-      expect(res.body.error).toBe('TOKEN_EXPIRED');
+      expect(errorOf(res)).toBe('TOKEN_EXPIRED');
     });
 
     it('returns 400 with VALIDATION_ERROR on missing token query param', async () => {
@@ -202,7 +209,7 @@ describe('Auth (e2e)', () => {
         .get('/auth/confirm-email')
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -246,7 +253,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'not-an-email' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -270,8 +277,9 @@ describe('Auth (e2e)', () => {
         .set('Authorization', `Bearer ${access_token}`)
         .expect(200);
 
-      expect(res.body.sub).toBeDefined();
-      expect(res.body.email).toBe('me@example.com');
+      const me = res.body as { sub: string; email: string };
+      expect(me.sub).toBeDefined();
+      expect(me.email).toBe('me@example.com');
     });
 
     it('GET / is accessible without any Authorization header (@Public)', async () => {
@@ -305,10 +313,10 @@ describe('Auth (e2e)', () => {
         .send({ email: 'login@example.com', password: 'password123' })
         .expect(200);
 
-      expect(res.body.access_token).toBeDefined();
-      expect(res.body.refresh_token).toBeDefined();
-      expect(typeof res.body.access_token).toBe('string');
-      expect(typeof res.body.refresh_token).toBe('string');
+      expect(tokensOf(res).access_token).toBeDefined();
+      expect(tokensOf(res).refresh_token).toBeDefined();
+      expect(typeof tokensOf(res).access_token).toBe('string');
+      expect(typeof tokensOf(res).refresh_token).toBe('string');
     });
 
     it('returns 401 with INVALID_CREDENTIALS on wrong password', async () => {
@@ -319,7 +327,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'wrongpass@example.com', password: 'incorrect' })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_CREDENTIALS');
+      expect(errorOf(res)).toBe('INVALID_CREDENTIALS');
     });
 
     it('returns 401 with INVALID_CREDENTIALS on unknown email', async () => {
@@ -328,7 +336,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'nobody@example.com', password: 'password123' })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_CREDENTIALS');
+      expect(errorOf(res)).toBe('INVALID_CREDENTIALS');
     });
 
     it('returns 403 with EMAIL_NOT_CONFIRMED when user is not confirmed', async () => {
@@ -341,7 +349,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'unconfirmed@example.com', password: 'password123' })
         .expect(403);
 
-      expect(res.body.error).toBe('EMAIL_NOT_CONFIRMED');
+      expect(errorOf(res)).toBe('EMAIL_NOT_CONFIRMED');
     });
 
     it('returns 400 with VALIDATION_ERROR on missing password', async () => {
@@ -350,7 +358,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'user@example.com' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -365,9 +373,9 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token })
         .expect(200);
 
-      expect(res.body.access_token).toBeDefined();
-      expect(res.body.refresh_token).toBeDefined();
-      expect(res.body.refresh_token).not.toBe(refresh_token);
+      expect(tokensOf(res).access_token).toBeDefined();
+      expect(tokensOf(res).refresh_token).toBeDefined();
+      expect(tokensOf(res).refresh_token).not.toBe(refresh_token);
     });
 
     it('returns 401 with INVALID_TOKEN on an unknown refresh token', async () => {
@@ -376,7 +384,7 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token: 'not-a-real-token' })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_TOKEN');
+      expect(errorOf(res)).toBe('INVALID_TOKEN');
     });
 
     it('returns 401 with TOKEN_EXPIRED on an expired refresh token', async () => {
@@ -397,7 +405,7 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token })
         .expect(401);
 
-      expect(res.body.error).toBe('TOKEN_EXPIRED');
+      expect(errorOf(res)).toBe('TOKEN_EXPIRED');
     });
 
     it('returns 200 with valid access token when reuse is within grace period', async () => {
@@ -413,7 +421,7 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token: token1 })
         .expect(200);
 
-      expect(res.body.access_token).toBeDefined();
+      expect(tokensOf(res).access_token).toBeDefined();
 
       const tokenHash = crypto
         .createHash('sha256')
@@ -452,7 +460,7 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token: token1 })
         .expect(401);
 
-      expect(res.body.error).toBe('TOKEN_REUSE_DETECTED');
+      expect(errorOf(res)).toBe('TOKEN_REUSE_DETECTED');
 
       const revokedRecord = await refreshTokenRepository.findOneBy({
         token_hash: tokenHash,
@@ -470,7 +478,7 @@ describe('Auth (e2e)', () => {
         .send({})
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -504,20 +512,18 @@ describe('Auth (e2e)', () => {
         .send({ refresh_token })
         .expect(401);
 
-      expect(['INVALID_TOKEN', 'TOKEN_REUSE_DETECTED']).toContain(
-        res.body.error,
-      );
+      expect(['INVALID_TOKEN', 'TOKEN_REUSE_DETECTED']).toContain(errorOf(res));
     });
   });
 
   async function capturePasswordResetToken(email: string): Promise<string> {
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
     let captured = '';
     jest
-      .spyOn(mailServiceInstance, 'sendPasswordResetEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
-        captured = t;
+      .spyOn(authService['mailService'], 'sendPasswordResetEmail')
+      .mockImplementationOnce((_email, _name, token) => {
+        captured = token;
+        return Promise.resolve();
       });
     await request(app.getHttpServer())
       .post('/auth/forgot-password')
@@ -548,7 +554,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'not-an-email' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -571,7 +577,7 @@ describe('Auth (e2e)', () => {
         .post('/auth/login')
         .send({ email: 'resetok@example.com', password: 'newpassword' })
         .expect(200);
-      expect(loginRes.body.access_token).toBeDefined();
+      expect(tokensOf(loginRes).access_token).toBeDefined();
     });
 
     it('revokes all refresh tokens after reset', async () => {
@@ -590,9 +596,7 @@ describe('Auth (e2e)', () => {
         .post('/auth/refresh')
         .send({ refresh_token })
         .expect(401);
-      expect(['INVALID_TOKEN', 'TOKEN_REUSE_DETECTED']).toContain(
-        res.body.error,
-      );
+      expect(['INVALID_TOKEN', 'TOKEN_REUSE_DETECTED']).toContain(errorOf(res));
     });
 
     it('returns 401 with INVALID_TOKEN on an unknown token', async () => {
@@ -601,7 +605,7 @@ describe('Auth (e2e)', () => {
         .send({ token: 'unknown', new_password: 'newpassword' })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_TOKEN');
+      expect(errorOf(res)).toBe('INVALID_TOKEN');
     });
 
     it('returns 401 with INVALID_TOKEN on a reused token', async () => {
@@ -618,7 +622,7 @@ describe('Auth (e2e)', () => {
         .send({ token, new_password: 'anotherpass' })
         .expect(401);
 
-      expect(res.body.error).toBe('INVALID_TOKEN');
+      expect(errorOf(res)).toBe('INVALID_TOKEN');
     });
 
     it('returns 401 with TOKEN_EXPIRED on an expired token', async () => {
@@ -635,7 +639,7 @@ describe('Auth (e2e)', () => {
         .send({ token, new_password: 'newpassword' })
         .expect(401);
 
-      expect(res.body.error).toBe('TOKEN_EXPIRED');
+      expect(errorOf(res)).toBe('TOKEN_EXPIRED');
     });
 
     it('returns 400 with VALIDATION_ERROR on missing token', async () => {
@@ -644,7 +648,7 @@ describe('Auth (e2e)', () => {
         .send({ new_password: 'newpassword' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
 
     it('returns 400 with VALIDATION_ERROR on short new_password', async () => {
@@ -653,7 +657,7 @@ describe('Auth (e2e)', () => {
         .send({ token: 'abc', new_password: 'short' })
         .expect(400);
 
-      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(errorOf(res)).toBe('VALIDATION_ERROR');
     });
   });
 });
