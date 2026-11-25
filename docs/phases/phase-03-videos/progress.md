@@ -150,11 +150,11 @@ Two reviewers checked the branch against the acceptance criteria and the automat
   - The README lists phase 03 as done.
 - **Not changed:** `src/storage/storage.module.spec.ts`, the module compilation test, stays. It is listed in SI-03.2 and every module of phases 01/02 has the same test.
 
-## Final verification
+## Final verification (commit `8e3816b`, Compose with every service healthy and `storage-init` exited 0)
 
 - `npx tsc --noEmit`: exit 0
 - `npm run lint`: exit 0, 0 errors, 23 warnings (`no-unsafe-argument`, configured as `warn`); `--fix` changed no file
-- `npm test`: 37 suites, 236 tests passing
-- `npm run test:e2e`: 5 suites, 79 tests passing
+- `npm test`: exit 0, 37 suites, 237 tests passing
+- `npm run test:e2e`: exit 0, 5 suites, 79 tests passing
 - `npx nest build`: exit 0, `dist/main.js` and `dist/worker.js` present
 - `video-worker` restarted on this code without errors; no `X-Amz-Signature` in its log
